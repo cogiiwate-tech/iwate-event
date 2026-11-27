@@ -55,6 +55,45 @@
     padding: 10px 12px; border-radius: 12px; border: 2px solid var(--line); background: var(--paper);
   }
 
+  .views {
+    display: flex; margin: 14px 0 0; padding: 4px; gap: 4px;
+    background: var(--paper); border-radius: 14px; box-shadow: 0 2px 6px rgba(80,40,50,.10);
+  }
+  .views button {
+    flex: 1; font: inherit; font-weight: 800; font-size: 16px; color: var(--maroon);
+    min-height: 46px; border: 0; border-radius: 10px; background: transparent; cursor: pointer;
+  }
+  .views button[aria-pressed="true"] { background: var(--maroon); color: #fff; }
+
+  .cal { margin-top: 16px; background: var(--paper); border-radius: 16px; padding: 12px 8px 10px; box-shadow: 0 2px 6px rgba(80,40,50,.12); }
+  .cal-head { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 10px; }
+  .cal-head h2 { margin: 0; font-size: 20px; font-weight: 900; color: var(--maroon); }
+  .cal-head button {
+    font: inherit; font-weight: 900; font-size: 15px; color: var(--maroon);
+    min-width: 76px; min-height: 42px; border-radius: 10px; border: 2px solid var(--line); background: #fff; cursor: pointer;
+  }
+  .cal-head button:disabled { opacity: .3; cursor: default; }
+  .grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+  .wk { text-align: center; font-size: 13px; font-weight: 800; color: var(--sub); padding-bottom: 2px; }
+  .wk.sun, .cell.sun .num { color: #C62848; }
+  .wk.sat, .cell.sat .num { color: #1F5FC9; }
+  .cell {
+    font: inherit; color: var(--ink); text-align: center; border: 0; padding: 4px 0 5px;
+    min-height: 62px; border-radius: 10px; background: #FAF5F6;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+  }
+  .cell.blank { background: transparent; }
+  .cell.past { opacity: .35; }
+  .cell.has { cursor: pointer; background: #F6E9EC; }
+  .cell.today { box-shadow: inset 0 0 0 2px var(--maroon); }
+  .cell.sel { background: var(--maroon); }
+  .cell.sel .num, .cell.sel .cnt { color: #fff; }
+  .cell .num { font-size: 17px; font-weight: 800; line-height: 1.2; }
+  .dots { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; max-width: 40px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 1px rgba(255,255,255,.8); }
+  .cnt { font-size: 11px; font-weight: 800; color: var(--maroon); line-height: 1; }
+  .cal-note { margin: 8px 4px 0; font-size: 12.5px; color: var(--sub); }
+
   .sec-title { margin: 22px 0 8px; font-size: 16px; font-weight: 900; color: var(--maroon); }
 
   .day { margin-top: 20px; }
@@ -148,11 +187,17 @@
     </p>
   </div>
 
+  <div class="views" role="group" aria-label="表示の切り替え">
+    <button type="button" id="v-list" aria-pressed="true">日付ごとの一覧</button>
+    <button type="button" id="v-cal" aria-pressed="false">月のカレンダー</button>
+  </div>
+
   <div class="filter">
     <label for="muni">市町村</label>
     <select id="muni"><option value="">すべての市町村</option></select>
   </div>
 
+  <div id="cal"></div>
   <div id="list"></div>
 </main>
 
@@ -265,9 +310,8 @@
     return d;
   }
 
-  function render() {
+  function collect() {
     var muni = sel.value;
-    list.textContent = "";
     var days = {}, ongoing = [];
     DATA.events.forEach(function (ev) {
       if (muni && ev.muni !== muni) return;
@@ -282,36 +326,139 @@
         if (k >= today) (days[k] = days[k] || []).push(ev);
       }
     });
+    return { days: days, ongoing: ongoing };
+  }
 
-    if (ongoing.length) {
-      list.appendChild(el("h2", "sec-title", "開催中（長く続くイベント）"));
-      var p = el("div", "panel");
-      ongoing.forEach(function (ev) { p.appendChild(eventNode(ev)); });
-      list.appendChild(p);
-    }
+  function daySection(k, evs) {
+    var d = toDate(k), w = d.getDay();
+    var sec = el("section", "day");
+    sec.id = "d-" + k;
+    var head = el("div", "day-head");
+    var badge = el("div", "badge" + (w === 6 ? " sat" : w === 0 ? " sun" : ""));
+    badge.appendChild(el("span", "md", (d.getMonth() + 1) + "/" + d.getDate()));
+    badge.appendChild(el("span", "wd", WD[w] + "曜日"));
+    head.appendChild(badge);
+    var note = k === today ? "きょう" : k === tomorrow ? "あした" : "";
+    head.appendChild(el("span", "day-note", (note ? note + "・" : "") + evs.length + "件"));
+    sec.appendChild(head);
+    var p = el("div", "panel");
+    evs.forEach(function (ev) { p.appendChild(eventNode(ev, k)); });
+    sec.appendChild(p);
+    return sec;
+  }
 
-    var keys = Object.keys(days).sort();
-    keys.forEach(function (k) {
-      var d = toDate(k), w = d.getDay();
-      var sec = el("section", "day");
-      var head = el("div", "day-head");
-      var badge = el("div", "badge" + (w === 6 ? " sat" : w === 0 ? " sun" : ""));
-      badge.appendChild(el("span", "md", (d.getMonth() + 1) + "/" + d.getDate()));
-      badge.appendChild(el("span", "wd", WD[w] + "曜日"));
-      head.appendChild(badge);
-      var note = k === today ? "きょう" : k === tomorrow ? "あした" : "";
-      head.appendChild(el("span", "day-note", (note ? note + "・" : "") + days[k].length + "件"));
-      sec.appendChild(head);
-      var p = el("div", "panel");
-      days[k].forEach(function (ev) { p.appendChild(eventNode(ev, k)); });
-      sec.appendChild(p);
-      list.appendChild(sec);
-    });
+  function ongoingBlock(ongoing) {
+    var frag = document.createDocumentFragment();
+    frag.appendChild(el("h2", "sec-title", "開催中（長く続くイベント）"));
+    var p = el("div", "panel");
+    ongoing.forEach(function (ev) { p.appendChild(eventNode(ev)); });
+    frag.appendChild(p);
+    return frag;
+  }
 
-    if (!keys.length && !ongoing.length) {
+  function renderList(data) {
+    if (data.ongoing.length) list.appendChild(ongoingBlock(data.ongoing));
+    var keys = Object.keys(data.days).sort();
+    keys.forEach(function (k) { list.appendChild(daySection(k, data.days[k])); });
+    if (!keys.length && !data.ongoing.length) {
       list.appendChild(el("div", "empty", "いま登録されているイベントはありません。"));
     }
   }
+
+  // ---- 月のカレンダー ----
+  var calMonth = null;   // 表示中の月（1日）
+  var selDay = null;     // 選んでいる日
+
+  function monthKey(d) { return d.getFullYear() * 12 + d.getMonth(); }
+
+  function renderCal(data, scrollToDay) {
+    var keys = Object.keys(data.days).sort();
+    var first = new Date(now.getFullYear(), now.getMonth(), 1);
+    var lastKey = keys.length ? keys[keys.length - 1] : today;
+    var last = toDate(lastKey); last = new Date(last.getFullYear(), last.getMonth(), 1);
+    if (!selDay || !data.days[selDay]) selDay = keys[0] || null;
+    if (!calMonth) calMonth = selDay ? new Date(toDate(selDay).getFullYear(), toDate(selDay).getMonth(), 1) : first;
+    if (monthKey(calMonth) < monthKey(first)) calMonth = first;
+    if (monthKey(calMonth) > monthKey(last)) calMonth = last;
+
+    var box = el("div", "cal");
+    var head = el("div", "cal-head");
+    var prev = el("button", "", "◀ 前の月");
+    var next = el("button", "", "次の月 ▶");
+    prev.type = next.type = "button";
+    prev.disabled = monthKey(calMonth) <= monthKey(first);
+    next.disabled = monthKey(calMonth) >= monthKey(last);
+    prev.onclick = function () { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); render(); };
+    next.onclick = function () { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); render(); };
+    head.appendChild(prev);
+    head.appendChild(el("h2", "", calMonth.getFullYear() + "年" + (calMonth.getMonth() + 1) + "月"));
+    head.appendChild(next);
+    box.appendChild(head);
+
+    var grid = el("div", "grid");
+    WD.forEach(function (w, i) { grid.appendChild(el("div", "wk" + (i === 0 ? " sun" : i === 6 ? " sat" : ""), w)); });
+    for (var b = 0; b < calMonth.getDay(); b++) grid.appendChild(el("div", "cell blank"));
+    var y = calMonth.getFullYear(), m = calMonth.getMonth();
+    var dim = new Date(y, m + 1, 0).getDate();
+    for (var day = 1; day <= dim; day++) {
+      var d = new Date(y, m, day), k = iso(d), w = d.getDay(), evs = data.days[k] || [];
+      var cls = "cell" + (w === 0 ? " sun" : w === 6 ? " sat" : "") + (k < today ? " past" : "") +
+                (k === today ? " today" : "") + (evs.length ? " has" : "") + (k === selDay ? " sel" : "");
+      var c = el(evs.length ? "button" : "div", cls);
+      c.appendChild(el("span", "num", String(day)));
+      if (evs.length) {
+        c.type = "button";
+        c.setAttribute("aria-label", (m + 1) + "月" + day + "日 " + evs.length + "件");
+        var dots = el("span", "dots");
+        evs.slice(0, 6).forEach(function (ev) {
+          var dot = el("span", "dot");
+          dot.style.setProperty("--c", ev.color);
+          dots.appendChild(dot);
+        });
+        c.appendChild(dots);
+        c.appendChild(el("span", "cnt", evs.length + "件"));
+        c.onclick = (function (key) { return function () { selDay = key; render(true); }; })(k);
+      }
+      grid.appendChild(c);
+    }
+    box.appendChild(grid);
+    box.appendChild(el("p", "cal-note", "日付を押すと、その日のイベントが下に出ます。点の色は市町村の色です。"));
+    calBox.appendChild(box);
+
+    if (selDay && data.days[selDay]) {
+      list.appendChild(daySection(selDay, data.days[selDay]));
+    } else if (!keys.length) {
+      list.appendChild(el("div", "empty", "いま登録されているイベントはありません。"));
+    }
+    if (data.ongoing.length) list.appendChild(ongoingBlock(data.ongoing));
+    if (scrollToDay && selDay) {
+      var target = document.getElementById("d-" + selDay);
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
+  var calBox = document.getElementById("cal");
+  var btnList = document.getElementById("v-list"), btnCal = document.getElementById("v-cal");
+  var view = "list";
+  try { if (localStorage.getItem("iwate-view") === "cal") view = "cal"; } catch (e) {}
+
+  function render(scrollToDay) {
+    list.textContent = "";
+    calBox.textContent = "";
+    btnList.setAttribute("aria-pressed", String(view === "list"));
+    btnCal.setAttribute("aria-pressed", String(view === "cal"));
+    var data = collect();
+    if (view === "cal") renderCal(data, scrollToDay);
+    else renderList(data);
+  }
+
+  function setView(v) {
+    view = v;
+    try { localStorage.setItem("iwate-view", v); } catch (e) {}
+    render();
+  }
+  btnList.addEventListener("click", function () { setView("list"); });
+  btnCal.addEventListener("click", function () { setView("cal"); });
 
   var munis = {};
   DATA.events.forEach(function (ev) { if (ev.muni && ev.e >= today) munis[ev.muni] = (munis[ev.muni] || 0) + 1; });
@@ -320,7 +467,7 @@
     o.value = m;
     sel.appendChild(o);
   });
-  sel.addEventListener("change", render);
+  sel.addEventListener("change", function () { selDay = null; calMonth = null; render(); });
 
   if (DATA.updated) {
     var u = DATA.updated.split(" ")[0].split("-");

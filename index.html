@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>岩手県イベント情報｜こぎの岩手カレンダー</title>
+<meta name="description" content="岩手県のイベントを日付ごとに一覧で。イベント名を押すと、日時・場所・公式ページが見られます。">
+<link rel="icon" href="icon.webp">
+<style>
+  :root {
+    --maroon: #672E38;
+    --maroon-dark: #4A1F27;
+    --ink: #3A2A2C;
+    --sub: #7A6468;
+    --line: #EADDE0;
+    --paper: #FFFFFF;
+    --bg1: #FBEFF3;
+    --bg2: #F6F1E7;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    color: var(--ink);
+    background: linear-gradient(180deg, var(--bg1), var(--bg2)) fixed;
+    font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  a { color: inherit; }
+
+  .top {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--maroon); color: #fff;
+    text-align: center; padding: 12px 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.18);
+  }
+  .top h1 { margin: 0; font-size: clamp(22px, 6.4vw, 30px); font-weight: 900; letter-spacing: .04em; line-height: 1.2; }
+
+  main { max-width: 640px; margin: 0 auto; padding: 16px 16px 40px; }
+
+  .intro {
+    display: flex; gap: 12px; align-items: center;
+    background: var(--paper); border-radius: 16px; padding: 12px 14px;
+    box-shadow: 0 2px 6px rgba(80,40,50,.10);
+  }
+  .intro img { width: 68px; height: 68px; flex: none; object-fit: contain; }
+  .intro p { margin: 0; font-size: 15px; font-weight: 700; }
+  .intro small { display: block; font-weight: 400; color: var(--sub); font-size: 12.5px; margin-top: 2px; }
+
+  .filter { margin: 14px 0 4px; display: flex; gap: 10px; align-items: center; }
+  .filter label { font-weight: 700; font-size: 15px; flex: none; }
+  .filter select {
+    flex: 1; min-width: 0; font: inherit; font-weight: 700; color: var(--ink);
+    padding: 10px 12px; border-radius: 12px; border: 2px solid var(--line); background: var(--paper);
+  }
+
+  .sec-title { margin: 22px 0 8px; font-size: 16px; font-weight: 900; color: var(--maroon); }
+
+  .day { margin-top: 20px; }
+  .day-head { display: flex; align-items: center; gap: 12px; margin-bottom: -14px; position: relative; z-index: 1; padding-left: 4px; }
+  .badge {
+    width: 92px; height: 92px; border-radius: 50%; flex: none; color: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-weight: 900; line-height: 1.05;
+    box-shadow: 0 3px 8px rgba(0,0,0,.22);
+    background: linear-gradient(135deg, #8C7A7D, #5E4D50);
+  }
+  .badge .md { font-size: 23px; }
+  .badge .wd { font-size: 13px; margin-top: 3px; }
+  .badge.sat { background: linear-gradient(200deg, #3FD3E6, #2A6FD6 55%, #1B1FBE); }
+  .badge.sun { background: linear-gradient(200deg, #E0447F, #C2488C 55%, #B0569A); }
+  .day-note { font-weight: 900; color: var(--maroon); font-size: 15px; padding-bottom: 14px; }
+
+  .panel {
+    background: var(--paper); border-radius: 16px; padding: 6px;
+    box-shadow: 0 2px 6px rgba(80,40,50,.12);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .day .panel { padding-top: 22px; }
+
+  details.ev { border-radius: 10px; }
+  details.ev > summary {
+    list-style: none; cursor: pointer;
+    display: flex; align-items: center; gap: 8px;
+    min-height: 52px; padding: 9px 12px 9px 14px;
+    border-radius: 10px; color: #fff; font-weight: 800; font-size: 17px; line-height: 1.35;
+    background: var(--c);
+    box-shadow: 2px 3px 5px rgba(0,0,0,.28);
+  }
+  details.ev > summary::-webkit-details-marker { display: none; }
+  details.ev > summary:focus-visible { outline: 3px solid #222; outline-offset: 2px; }
+  details.ev.dark-text > summary { color: #3A2A00; }
+  .ttl { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .tag {
+    display: inline-block; margin-right: 6px; padding: 0 7px; border-radius: 6px;
+    background: rgba(255,255,255,.92); color: #8A1C1C; font-size: 13px; font-weight: 900; vertical-align: 2px;
+  }
+  .chev { flex: none; width: 26px; height: 26px; border-radius: 50%; background: rgba(255,255,255,.28); position: relative; }
+  .chev::before {
+    content: ""; position: absolute; left: 8px; top: 6px; width: 8px; height: 8px;
+    border-right: 3px solid currentColor; border-bottom: 3px solid currentColor; transform: rotate(45deg);
+    transition: transform .15s;
+  }
+  details[open] .chev::before { transform: rotate(-135deg); top: 10px; }
+  @media (prefers-reduced-motion: reduce) { .chev::before { transition: none; } }
+
+  .body { padding: 12px 10px 14px; border-left: 5px solid var(--c); margin: 6px 2px 4px 6px; }
+  .row { display: flex; gap: 10px; margin-bottom: 8px; }
+  .row .k {
+    flex: none; width: 4.6em; text-align: center; align-self: flex-start;
+    font-size: 13px; font-weight: 800; color: var(--maroon);
+    background: #F6E9EC; border-radius: 6px; padding: 2px 4px; margin-top: 2px;
+  }
+  .row .v { flex: 1; min-width: 0; white-space: pre-line; overflow-wrap: anywhere; font-size: 15.5px; }
+  .map { display: inline-block; margin-top: 2px; font-size: 14px; font-weight: 700; color: #1A5FB4; }
+  .btns { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 50px; padding: 10px 14px; border-radius: 12px;
+    background: var(--maroon); color: #fff; text-decoration: none; font-weight: 800; font-size: 16px;
+    box-shadow: 0 2px 4px rgba(0,0,0,.2);
+  }
+  .btn.sub { background: #fff; color: var(--maroon); border: 2px solid var(--maroon); box-shadow: none; }
+  .btn::after { content: "↗"; font-weight: 900; }
+  .hint { margin: 8px 0 0; font-size: 12.5px; color: var(--sub); }
+
+  .empty { background: var(--paper); border-radius: 16px; padding: 24px 16px; text-align: center; margin-top: 20px; font-weight: 700; }
+
+  footer { max-width: 640px; margin: 0 auto; padding: 0 16px 48px; }
+  .notice {
+    background: var(--paper); border-radius: 16px; padding: 14px 16px; font-weight: 800; text-align: center;
+    box-shadow: 0 2px 6px rgba(80,40,50,.10);
+  }
+  .links { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+  .credit { text-align: center; color: var(--sub); font-size: 12.5px; margin-top: 16px; }
+</style>
+</head>
+<body>
+
+<header class="top"><h1>岩手県イベント情報</h1></header>
+
+<main>
+  <div class="intro">
+    <img src="icon.webp" alt="こぎ">
+    <p>イベント名を押すと、くわしい情報と公式ページが見られます。
+      <small id="updated"></small>
+    </p>
+  </div>
+
+  <div class="filter">
+    <label for="muni">市町村</label>
+    <select id="muni"><option value="">すべての市町村</option></select>
+  </div>
+
+  <div id="list"></div>
+</main>
+
+<footer>
+  <div class="notice">おでかけ前には必ず公式ページを確認してください♪</div>
+  <div class="links">
+    <a class="btn sub" href="https://www.instagram.com/cogi766/" target="_blank" rel="noopener">こぎのInstagram（@cogi766）</a>
+    <a class="btn sub" href="https://calendar.google.com/calendar/embed?src=cogi.kaicho%40gmail.com&ctz=Asia%2FTokyo" target="_blank" rel="noopener">カレンダーで全部の予定を見る</a>
+  </div>
+  <p class="credit">こぎの岩手カレンダー</p>
+</footer>
+
+<script src="events.js"></script>
+<script>
+(function () {
+  var DATA = window.IWATE_EVENTS || { events: [], updated: "" };
+  var WD = ["日", "月", "火", "水", "木", "金", "土"];
+  var LIGHT_BARS = { "#F6BF26": true };   // 白い字が読みにくい色は、こげ茶の字にする
+  var list = document.getElementById("list");
+  var sel = document.getElementById("muni");
+
+  function iso(d) {
+    return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+  }
+  function toDate(s) { var p = s.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function addDays(d, n) { var x = new Date(d); x.setDate(x.getDate() + n); return x; }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function md(s) { var d = toDate(s); return (d.getMonth() + 1) + "/" + d.getDate(); }
+
+  var now = new Date();
+  var today = iso(now), tomorrow = iso(addDays(now, 1));
+
+  function service(url) {
+    var h = "";
+    try { h = new URL(url).hostname.replace(/^www\./, ""); } catch (e) { return ""; }
+    if (/instagram\.com$/.test(h)) return "Instagram";
+    if (/facebook\.com$|fb\.me$/.test(h)) return "Facebook";
+    if (/^(x|twitter)\.com$/.test(h)) return "X";
+    if (/threads\.(net|com)$/.test(h)) return "Threads";
+    if (/youtube\.com$|youtu\.be$/.test(h)) return "YouTube";
+    if (/\.pdf($|\?)/i.test(url)) return "PDF";
+    return "";
+  }
+
+  function linkLabel(key, link) {
+    var base = link.label || (key === "公式" || !key ? "公式ページ" : key);
+    var sv = service(link.url);
+    if (sv && base.toLowerCase().indexOf(sv.toLowerCase()) < 0) base += "（" + sv + "）";
+    return base + "を見る";
+  }
+
+  function eventNode(ev, dayIso) {
+    var d = el("details", "ev" + (LIGHT_BARS[ev.color] ? " dark-text" : ""));
+    d.style.setProperty("--c", ev.color);
+    var s = el("summary");
+    var t = el("span", "ttl");
+    if (ev.tag) t.appendChild(el("span", "tag", ev.tag));
+    t.appendChild(document.createTextNode((ev.muni ? "【" + ev.muni + "】" : "") + ev.name));
+    s.appendChild(t);
+    s.appendChild(el("span", "chev"));
+    d.appendChild(s);
+
+    var b = el("div", "body");
+    if (ev.e !== ev.s) {
+      var r0 = el("div", "row");
+      r0.appendChild(el("span", "k", "期間"));
+      r0.appendChild(el("span", "v", md(ev.s) + "（" + WD[toDate(ev.s).getDay()] + "）〜 " + md(ev.e) + "（" + WD[toDate(ev.e).getDay()] + "）"));
+      b.appendChild(r0);
+    }
+    var links = [], hasInsta = false;
+    ev.f.forEach(function (f) {
+      if (f.t) {
+        var r = el("div", "row");
+        r.appendChild(el("span", "k", f.k || "メモ"));
+        var v = el("span", "v", f.t);
+        if (f.k === "場所" || f.k === "会場") {
+          var q = (ev.muni ? "岩手県" + ev.muni + " " : "岩手県 ") + f.t.split("\n")[0];
+          var a = el("a", "map", "地図で見る ↗");
+          a.href = "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
+          a.target = "_blank"; a.rel = "noopener";
+          v.appendChild(document.createElement("br"));
+          v.appendChild(a);
+        }
+        r.appendChild(v);
+        b.appendChild(r);
+      }
+      (f.u || []).forEach(function (u) {
+        if (/^https?:\/\//.test(u.url)) links.push({ key: f.k, link: u });
+      });
+    });
+    if (links.length) {
+      var box = el("div", "btns");
+      links.forEach(function (x, i) {
+        var a = el("a", "btn" + (i ? " sub" : ""), linkLabel(x.key, x.link));
+        a.href = x.link.url; a.target = "_blank"; a.rel = "noopener";
+        if (service(x.link.url) === "Instagram") hasInsta = true;
+        box.appendChild(a);
+      });
+      b.appendChild(box);
+      if (hasInsta) b.appendChild(el("p", "hint", "※Instagramのリンクは、ログイン画面が出ることがあります。"));
+    } else {
+      b.appendChild(el("p", "hint", "公式ページのリンクはまだ登録されていません。"));
+    }
+    d.appendChild(b);
+    return d;
+  }
+
+  function render() {
+    var muni = sel.value;
+    list.textContent = "";
+    var days = {}, ongoing = [];
+    DATA.events.forEach(function (ev) {
+      if (muni && ev.muni !== muni) return;
+      if (ev.e < today) return;
+      if (ev.long) {
+        if (ev.s < today) ongoing.push(ev);
+        else (days[ev.s] = days[ev.s] || []).push(ev);
+        return;
+      }
+      for (var d = toDate(ev.s), end = toDate(ev.e); d <= end; d = addDays(d, 1)) {
+        var k = iso(d);
+        if (k >= today) (days[k] = days[k] || []).push(ev);
+      }
+    });
+
+    if (ongoing.length) {
+      list.appendChild(el("h2", "sec-title", "開催中（長く続くイベント）"));
+      var p = el("div", "panel");
+      ongoing.forEach(function (ev) { p.appendChild(eventNode(ev)); });
+      list.appendChild(p);
+    }
+
+    var keys = Object.keys(days).sort();
+    keys.forEach(function (k) {
+      var d = toDate(k), w = d.getDay();
+      var sec = el("section", "day");
+      var head = el("div", "day-head");
+      var badge = el("div", "badge" + (w === 6 ? " sat" : w === 0 ? " sun" : ""));
+      badge.appendChild(el("span", "md", (d.getMonth() + 1) + "/" + d.getDate()));
+      badge.appendChild(el("span", "wd", WD[w] + "曜日"));
+      head.appendChild(badge);
+      var note = k === today ? "きょう" : k === tomorrow ? "あした" : "";
+      head.appendChild(el("span", "day-note", (note ? note + "・" : "") + days[k].length + "件"));
+      sec.appendChild(head);
+      var p = el("div", "panel");
+      days[k].forEach(function (ev) { p.appendChild(eventNode(ev, k)); });
+      sec.appendChild(p);
+      list.appendChild(sec);
+    });
+
+    if (!keys.length && !ongoing.length) {
+      list.appendChild(el("div", "empty", "いま登録されているイベントはありません。"));
+    }
+  }
+
+  var munis = {};
+  DATA.events.forEach(function (ev) { if (ev.muni && ev.e >= today) munis[ev.muni] = (munis[ev.muni] || 0) + 1; });
+  Object.keys(munis).sort(function (a, b) { return munis[b] - munis[a] || a.localeCompare(b, "ja"); }).forEach(function (m) {
+    var o = el("option", "", m + "（" + munis[m] + "）");
+    o.value = m;
+    sel.appendChild(o);
+  });
+  sel.addEventListener("change", render);
+
+  if (DATA.updated) {
+    var u = DATA.updated.split(" ")[0].split("-");
+    document.getElementById("updated").textContent = (+u[1]) + "月" + (+u[2]) + "日 更新";
+  }
+  render();
+})();
+</script>
+</body>
+</html>

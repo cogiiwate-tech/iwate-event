@@ -55,6 +55,30 @@
     padding: 10px 12px; border-radius: 12px; border: 2px solid var(--line); background: var(--paper);
   }
 
+  .search { position: relative; margin: 14px 0 0; }
+  .search input {
+    width: 100%; font: inherit; font-size: 16px; font-weight: 700; color: var(--ink);
+    padding: 12px 48px 12px 44px; border-radius: 14px; border: 2px solid var(--line); background: var(--paper);
+    -webkit-appearance: none; appearance: none;
+  }
+  .search input::-webkit-search-cancel-button { display: none; }
+  .search::before {
+    content: ""; position: absolute; left: 16px; top: 50%; width: 13px; height: 13px; margin-top: -9px;
+    border: 3px solid var(--sub); border-radius: 50%;
+  }
+  .search::after {
+    content: ""; position: absolute; left: 29px; top: 50%; width: 3px; height: 8px; margin-top: 3px;
+    background: var(--sub); border-radius: 2px; transform: rotate(-45deg);
+  }
+  .search button {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    width: 38px; height: 38px; border: 0; border-radius: 50%; background: #F1E4E7; color: var(--maroon);
+    font-size: 20px; font-weight: 900; cursor: pointer;
+  }
+  .result-note { margin: 16px 2px 0; font-weight: 800; color: var(--maroon); }
+  .result-date { font-size: 13.5px; font-weight: 800; color: var(--sub); margin: 4px 4px -2px; }
+  .result-date.past { color: #9C8C8F; }
+  .more { margin-top: 10px; width: 100%; font: inherit; cursor: pointer; }
   .views {
     display: flex; margin: 14px 0 0; padding: 4px; gap: 4px;
     background: var(--paper); border-radius: 14px; box-shadow: 0 2px 6px rgba(80,40,50,.10);
@@ -187,6 +211,11 @@
     </p>
   </div>
 
+  <form class="search" role="search" id="search-form">
+    <input type="search" id="q" placeholder="イベント名・市町村で検索" aria-label="イベント名・市町村で検索" autocomplete="off" enterkeyhint="search">
+    <button type="button" id="q-clear" aria-label="検索をやめる" hidden>×</button>
+  </form>
+
   <div class="views" role="group" aria-label="表示の切り替え">
     <button type="button" id="v-list" aria-pressed="true">日付ごとの一覧</button>
     <button type="button" id="v-cal" aria-pressed="false">月のカレンダー</button>
@@ -310,20 +339,21 @@
     return d;
   }
 
-  function collect() {
+  // ---- 日付ごとにまとめる ----
+  function byDay(events, from, to) {
     var muni = sel.value;
     var days = {}, ongoing = [];
-    DATA.events.forEach(function (ev) {
-      if (muni && ev.muni !== muni) return;
-      if (ev.e < today) return;
+    events.forEach(function (ev) {
+      if (muni && ev.area !== muni) return;
+      if (ev.e < from || ev.s > to) return;
       if (ev.long) {
-        if (ev.s < today) ongoing.push(ev);
+        if (ev.s < from) ongoing.push(ev);
         else (days[ev.s] = days[ev.s] || []).push(ev);
         return;
       }
       for (var d = toDate(ev.s), end = toDate(ev.e); d <= end; d = addDays(d, 1)) {
         var k = iso(d);
-        if (k >= today) (days[k] = days[k] || []).push(ev);
+        if (k >= from && k <= to) (days[k] = days[k] || []).push(ev);
       }
     });
     return { days: days, ongoing: ongoing };
@@ -338,7 +368,7 @@
     badge.appendChild(el("span", "md", (d.getMonth() + 1) + "/" + d.getDate()));
     badge.appendChild(el("span", "wd", WD[w] + "曜日"));
     head.appendChild(badge);
-    var note = k === today ? "きょう" : k === tomorrow ? "あした" : "";
+    var note = k === today ? "きょう" : k === tomorrow ? "あした" : k < today ? d.getFullYear() + "年・終了" : "";
     head.appendChild(el("span", "day-note", (note ? note + "・" : "") + evs.length + "件"));
     sec.appendChild(head);
     var p = el("div", "panel");
@@ -347,109 +377,229 @@
     return sec;
   }
 
-  function ongoingBlock(ongoing) {
+  function ongoingBlock(title, evs) {
     var frag = document.createDocumentFragment();
-    frag.appendChild(el("h2", "sec-title", "開催中（長く続くイベント）"));
+    frag.appendChild(el("h2", "sec-title", title));
     var p = el("div", "panel");
-    ongoing.forEach(function (ev) { p.appendChild(eventNode(ev)); });
+    evs.forEach(function (ev) { p.appendChild(eventNode(ev)); });
     frag.appendChild(p);
     return frag;
   }
 
-  function renderList(data) {
-    if (data.ongoing.length) list.appendChild(ongoingBlock(data.ongoing));
+  function emptyBox(text) { list.appendChild(el("div", "empty", text)); }
+
+  // ---- 日付ごとの一覧（これからの予定） ----
+  function renderList() {
+    var data = byDay(DATA.events, today, "9999-12-31");
+    if (data.ongoing.length) list.appendChild(ongoingBlock("開催中（長く続くイベント）", data.ongoing));
     var keys = Object.keys(data.days).sort();
     keys.forEach(function (k) { list.appendChild(daySection(k, data.days[k])); });
-    if (!keys.length && !data.ongoing.length) {
-      list.appendChild(el("div", "empty", "いま登録されているイベントはありません。"));
+    if (!keys.length && !data.ongoing.length) emptyBox("いま登録されているイベントはありません。");
+  }
+
+  // ---- データの読み込み（月ごと・検索用） ----
+  var monthCache = {}, allData = null, allLoading = null;
+  function loadJSON(url) {
+    return fetch(url, { cache: "no-cache" }).then(function (r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    });
+  }
+  function loadMonth(key) {
+    if (monthCache[key]) return Promise.resolve(monthCache[key]);
+    if ((DATA.months || []).indexOf(key) < 0) return Promise.resolve([]);
+    return loadJSON("data/" + key + ".json?v=" + encodeURIComponent(DATA.updated))
+      .then(function (evs) { monthCache[key] = evs; return evs; });
+  }
+  function loadAll() {
+    if (allData) return Promise.resolve(allData);
+    if (!allLoading) {
+      allLoading = loadJSON("data/all.json?v=" + encodeURIComponent(DATA.updated))
+        .then(function (evs) { allData = evs; return evs; })
+        .catch(function (e) { allLoading = null; throw e; });
     }
+    return allLoading;
   }
 
   // ---- 月のカレンダー ----
   var calMonth = null;   // 表示中の月（1日）
   var selDay = null;     // 選んでいる日
+  var token = 0;         // 古い読み込み結果で上書きしないための番号
 
   function monthKey(d) { return d.getFullYear() * 12 + d.getMonth(); }
+  function ym(d) { return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2); }
+  function fromYm(s) { var p = s.split("-"); return new Date(+p[0], +p[1] - 1, 1); }
 
-  function renderCal(data, scrollToDay) {
-    var keys = Object.keys(data.days).sort();
-    var first = new Date(now.getFullYear(), now.getMonth(), 1);
-    var lastKey = keys.length ? keys[keys.length - 1] : today;
-    var last = toDate(lastKey); last = new Date(last.getFullYear(), last.getMonth(), 1);
-    if (!selDay || !data.days[selDay]) selDay = keys[0] || null;
-    if (!calMonth) calMonth = selDay ? new Date(toDate(selDay).getFullYear(), toDate(selDay).getMonth(), 1) : first;
+  function renderCal(scrollToDay) {
+    var first = fromYm(DATA.first || ym(now)), last = fromYm(DATA.last || ym(now));
+    if (!calMonth) calMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     if (monthKey(calMonth) < monthKey(first)) calMonth = first;
     if (monthKey(calMonth) > monthKey(last)) calMonth = last;
-
-    var box = el("div", "cal");
-    var head = el("div", "cal-head");
-    var prev = el("button", "", "◀ 前の月");
-    var next = el("button", "", "次の月 ▶");
-    prev.type = next.type = "button";
-    prev.disabled = monthKey(calMonth) <= monthKey(first);
-    next.disabled = monthKey(calMonth) >= monthKey(last);
-    prev.onclick = function () { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); render(); };
-    next.onclick = function () { calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); render(); };
-    head.appendChild(prev);
-    head.appendChild(el("h2", "", calMonth.getFullYear() + "年" + (calMonth.getMonth() + 1) + "月"));
-    head.appendChild(next);
-    box.appendChild(head);
-
-    var grid = el("div", "grid");
-    WD.forEach(function (w, i) { grid.appendChild(el("div", "wk" + (i === 0 ? " sun" : i === 6 ? " sat" : ""), w)); });
-    for (var b = 0; b < calMonth.getDay(); b++) grid.appendChild(el("div", "cell blank"));
+    var my = token;
     var y = calMonth.getFullYear(), m = calMonth.getMonth();
-    var dim = new Date(y, m + 1, 0).getDate();
-    for (var day = 1; day <= dim; day++) {
-      var d = new Date(y, m, day), k = iso(d), w = d.getDay(), evs = data.days[k] || [];
-      var cls = "cell" + (w === 0 ? " sun" : w === 6 ? " sat" : "") + (k < today ? " past" : "") +
-                (k === today ? " today" : "") + (evs.length ? " has" : "") + (k === selDay ? " sel" : "");
-      var c = el(evs.length ? "button" : "div", cls);
-      c.appendChild(el("span", "num", String(day)));
-      if (evs.length) {
-        c.type = "button";
-        c.setAttribute("aria-label", (m + 1) + "月" + day + "日 " + evs.length + "件");
-        var dots = el("span", "dots");
-        evs.slice(0, 6).forEach(function (ev) {
-          var dot = el("span", "dot");
-          dot.style.setProperty("--c", ev.color);
-          dots.appendChild(dot);
-        });
-        c.appendChild(dots);
-        c.appendChild(el("span", "cnt", evs.length + "件"));
-        c.onclick = (function (key) { return function () { selDay = key; render(true); }; })(k);
-      }
-      grid.appendChild(c);
-    }
-    box.appendChild(grid);
-    box.appendChild(el("p", "cal-note", "日付を押すと、その日のイベントが下に出ます。点の色は市町村の色です。"));
-    calBox.appendChild(box);
+    var from = iso(new Date(y, m, 1)), to = iso(new Date(y, m + 1, 0));
 
-    if (selDay && data.days[selDay]) {
-      list.appendChild(daySection(selDay, data.days[selDay]));
-    } else if (!keys.length) {
-      list.appendChild(el("div", "empty", "いま登録されているイベントはありません。"));
-    }
-    if (data.ongoing.length) list.appendChild(ongoingBlock(data.ongoing));
-    if (scrollToDay && selDay) {
-      var target = document.getElementById("d-" + selDay);
-      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+    calBox.appendChild(el("div", "cal", "読み込み中…"));
+    loadMonth(ym(calMonth)).then(function (evs) {
+      if (my !== token) return;
+      calBox.textContent = "";
+      var data = byDay(evs, from, to);
+      var keys = Object.keys(data.days).sort();
+      if (!selDay || selDay < from || selDay > to || !data.days[selDay]) {
+        var future = keys.filter(function (k) { return k >= today; });
+        selDay = future[0] || keys[0] || null;
+      }
+
+      var box = el("div", "cal");
+      var head = el("div", "cal-head");
+      var prev = el("button", "", "◀ 前の月");
+      var next = el("button", "", "次の月 ▶");
+      prev.type = next.type = "button";
+      prev.disabled = monthKey(calMonth) <= monthKey(first);
+      next.disabled = monthKey(calMonth) >= monthKey(last);
+      prev.onclick = function () { calMonth = new Date(y, m - 1, 1); selDay = null; render(); };
+      next.onclick = function () { calMonth = new Date(y, m + 1, 1); selDay = null; render(); };
+      head.appendChild(prev);
+      head.appendChild(el("h2", "", y + "年" + (m + 1) + "月"));
+      head.appendChild(next);
+      box.appendChild(head);
+
+      var grid = el("div", "grid");
+      WD.forEach(function (w, i) { grid.appendChild(el("div", "wk" + (i === 0 ? " sun" : i === 6 ? " sat" : ""), w)); });
+      for (var b = 0; b < calMonth.getDay(); b++) grid.appendChild(el("div", "cell blank"));
+      var dim = new Date(y, m + 1, 0).getDate();
+      for (var day = 1; day <= dim; day++) {
+        var d = new Date(y, m, day), k = iso(d), w = d.getDay(), dayEvs = data.days[k] || [];
+        var cls = "cell" + (w === 0 ? " sun" : w === 6 ? " sat" : "") + (k < today && !dayEvs.length ? " past" : "") +
+                  (k === today ? " today" : "") + (dayEvs.length ? " has" : "") + (k === selDay ? " sel" : "");
+        var c = el(dayEvs.length ? "button" : "div", cls);
+        c.appendChild(el("span", "num", String(day)));
+        if (dayEvs.length) {
+          c.type = "button";
+          c.setAttribute("aria-label", (m + 1) + "月" + day + "日 " + dayEvs.length + "件");
+          var dots = el("span", "dots");
+          dayEvs.slice(0, 6).forEach(function (ev) {
+            var dot = el("span", "dot");
+            dot.style.setProperty("--c", ev.color);
+            dots.appendChild(dot);
+          });
+          c.appendChild(dots);
+          c.appendChild(el("span", "cnt", dayEvs.length + "件"));
+          c.onclick = (function (key) { return function () { selDay = key; render(true); }; })(k);
+        }
+        grid.appendChild(c);
+      }
+      box.appendChild(grid);
+      box.appendChild(el("p", "cal-note", "日付を押すと、その日のイベントが下に出ます。点の色は市町村の色です。過去の月もさかのぼって見られます。"));
+      calBox.appendChild(box);
+
+      if (selDay) list.appendChild(daySection(selDay, data.days[selDay]));
+      else emptyBox("この月に登録されているイベントはありません。");
+      var longOnDay = evs.filter(function (ev) {
+        return ev.long && selDay && ev.s < selDay && ev.e >= selDay && (!sel.value || ev.area === sel.value);
+      });
+      if (longOnDay.length) list.appendChild(ongoingBlock("この日も開催中（長く続くイベント）", longOnDay));
+      if (scrollToDay && selDay) {
+        var target = document.getElementById("d-" + selDay);
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }).catch(function () {
+      if (my !== token) return;
+      calBox.textContent = "";
+      emptyBox("読み込めませんでした。通信のよい場所で、もう一度開いてください。");
+    });
   }
 
+  // ---- 検索 ----
+  var qInput = document.getElementById("q"), qClear = document.getElementById("q-clear");
+  var PAST_STEP = 30, pastShown = PAST_STEP;
+
+  function norm(s) {
+    s = (s || "").normalize ? s.normalize("NFKC") : (s || "");
+    s = s.toLowerCase().replace(/[ァ-ヶ]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0x60); });
+    return s.replace(/[\s・･\-ー－〜~「」『』【】（）()]/g, "");
+  }
+
+  function dateLabel(ev) {
+    var s = toDate(ev.s), t = s.getFullYear() + "年" + (s.getMonth() + 1) + "月" + s.getDate() + "日（" + WD[s.getDay()] + "）";
+    if (ev.e !== ev.s) { var e = toDate(ev.e); t += "〜" + (e.getMonth() + 1) + "月" + e.getDate() + "日（" + WD[e.getDay()] + "）"; }
+    return t;
+  }
+
+  function renderSearch(q) {
+    var my = token;
+    list.appendChild(el("p", "result-note", "検索中…"));
+    loadAll().then(function (all) {
+      if (my !== token) return;
+      list.textContent = "";
+      var words = q.split(/[\s　]+/).map(norm).filter(Boolean);
+      var muni = sel.value;
+      var hits = all.filter(function (ev) {
+        if (muni && ev.area !== muni) return false;
+        var hay = norm(ev.tag + ev.muni + ev.area + ev.name);
+        return words.every(function (w) { return hay.indexOf(w) >= 0; });
+      });
+      var upcoming = hits.filter(function (ev) { return ev.e >= today; });
+      var past = hits.filter(function (ev) { return ev.e < today; }).reverse();
+      list.appendChild(el("p", "result-note", "「" + q + "」の検索結果：これから " + upcoming.length + "件／過去 " + past.length + "件"));
+      function block(title, evs, isPast) {
+        list.appendChild(el("h2", "sec-title", title));
+        var p = el("div", "panel");
+        evs.forEach(function (ev) {
+          p.appendChild(el("div", "result-date" + (isPast ? " past" : ""), dateLabel(ev)));
+          p.appendChild(eventNode(ev));
+        });
+        list.appendChild(p);
+      }
+      if (upcoming.length) block("これからのイベント", upcoming, false);
+      if (past.length) {
+        block("過去のイベント（新しい順）", past.slice(0, pastShown), true);
+        if (past.length > pastShown) {
+          var more = el("button", "btn sub more", "過去のイベントをもっと見る（残り" + (past.length - pastShown) + "件）");
+          more.type = "button";
+          more.onclick = function () { pastShown += PAST_STEP; render(); };
+          list.appendChild(more);
+        }
+      }
+      if (!hits.length) emptyBox("見つかりませんでした。言葉を短くするか、市町村を「すべて」にして試してください。");
+    }).catch(function () {
+      if (my !== token) return;
+      list.textContent = "";
+      emptyBox("読み込めませんでした。通信のよい場所で、もう一度検索してください。");
+    });
+  }
+
+  var timer = null;
+  qInput.addEventListener("input", function () {
+    qClear.hidden = !qInput.value;
+    clearTimeout(timer);
+    timer = setTimeout(function () { pastShown = PAST_STEP; render(); }, 250);
+  });
+  document.getElementById("search-form").addEventListener("submit", function (e) {
+    e.preventDefault(); qInput.blur(); pastShown = PAST_STEP; render();
+  });
+  qClear.addEventListener("click", function () {
+    qInput.value = ""; qClear.hidden = true; render(); qInput.focus();
+  });
+
+  // ---- 表示の切り替え ----
   var calBox = document.getElementById("cal");
   var btnList = document.getElementById("v-list"), btnCal = document.getElementById("v-cal");
+  var viewsBox = document.querySelector(".views");
   var view = "list";
   try { if (localStorage.getItem("iwate-view") === "cal") view = "cal"; } catch (e) {}
 
   function render(scrollToDay) {
+    token++;
     list.textContent = "";
     calBox.textContent = "";
+    var q = qInput.value.trim();
+    viewsBox.style.display = q ? "none" : "";
     btnList.setAttribute("aria-pressed", String(view === "list"));
     btnCal.setAttribute("aria-pressed", String(view === "cal"));
-    var data = collect();
-    if (view === "cal") renderCal(data, scrollToDay);
-    else renderList(data);
+    if (q) renderSearch(q);
+    else if (view === "cal") renderCal(scrollToDay);
+    else renderList();
   }
 
   function setView(v) {
@@ -461,17 +611,18 @@
   btnCal.addEventListener("click", function () { setView("cal"); });
 
   var munis = {};
-  DATA.events.forEach(function (ev) { if (ev.muni && ev.e >= today) munis[ev.muni] = (munis[ev.muni] || 0) + 1; });
+  (DATA.munis || []).forEach(function (m) { munis[m] = 0; });
+  DATA.events.forEach(function (ev) { if (ev.area && ev.e >= today) munis[ev.area] = (munis[ev.area] || 0) + 1; });
   Object.keys(munis).sort(function (a, b) { return munis[b] - munis[a] || a.localeCompare(b, "ja"); }).forEach(function (m) {
-    var o = el("option", "", m + "（" + munis[m] + "）");
+    var o = el("option", "", munis[m] ? m + "（これから" + munis[m] + "件）" : m);
     o.value = m;
     sel.appendChild(o);
   });
-  sel.addEventListener("change", function () { selDay = null; calMonth = null; render(); });
+  sel.addEventListener("change", function () { selDay = null; pastShown = PAST_STEP; render(); });
 
   if (DATA.updated) {
-    var u = DATA.updated.split(" ")[0].split("-");
-    document.getElementById("updated").textContent = (+u[1]) + "月" + (+u[2]) + "日 更新";
+    var u = DATA.updated.split(" "), ud = u[0].split("-");
+    document.getElementById("updated").textContent = (+ud[1]) + "月" + (+ud[2]) + "日 " + (u[1] || "") + " 更新（毎日 5時・12時・18時に自動更新）";
   }
   render();
 })();

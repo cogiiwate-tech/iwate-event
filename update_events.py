@@ -12,7 +12,7 @@ import re
 import urllib.request
 
 ICS_URL = "https://calendar.google.com/calendar/ical/cogi.kaicho%40gmail.com/public/basic.ics"
-DAYS_AHEAD = 62          # 今日から何日先まで載せるか
+YEARS_AHEAD = 2          # くり返しの予定（終わりの日なし）を何年先まで広げるか
 LONG_DAYS = 7            # これより長い催しは「開催中」の欄にまとめる
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -33,6 +33,46 @@ for m in ["奥州市", "雫石町", "八幡平市", "住田町", "岩手町", "�
     COLORS[m] = C_INDIGO
 DEFAULT_COLOR = "#6B4F4F"
 ALIASES = {"金ヶ崎町": "金ケ崎町", "陸前高田": "陸前高田市"}
+# 岩手県の33市町村（しぼり込みと色分けに使う）
+OFFICIAL = ["盛岡市", "宮古市", "大船渡市", "花巻市", "北上市", "久慈市", "遠野市", "一関市", "陸前高田市",
+            "釜石市", "二戸市", "八幡平市", "奥州市", "滝沢市", "雫石町", "葛巻町", "岩手町", "紫波町",
+            "矢巾町", "西和賀町", "金ケ崎町", "平泉町", "住田町", "大槌町", "山田町", "岩泉町", "田野畑村",
+            "普代村", "軽米町", "野田村", "九戸村", "洋野町", "一戸町"]
+# 昔の書き方・地区名 → 市町村
+AREA_ALIASES = {"金ヶ崎町": "金ケ崎町", "陸前高田": "陸前高田市", "久慈": "久慈市", "大船渡": "大船渡市",
+                "譜代村": "普代村", "滝沢村": "滝沢市", "石鳥谷": "花巻市", "石鳥谷町": "花巻市",
+                "種市町": "洋野町", "一関町": "一関市", "盛岡駅": "盛岡市", "安比": "八幡平市"}
+
+
+def area_of(text):
+    """【】の中身から市町村を見つける。見つからなければ空。"""
+    t = AREA_ALIASES.get(text, text)
+    for m in OFFICIAL:
+        if t.startswith(m):
+            return m
+    for k, v in AREA_ALIASES.items():
+        if t.startswith(k):
+            return v
+    return ""
+
+
+def split_title(summary):
+    """「有料【盛岡市】氷の世界」→ (接頭辞, 【】の中身, 市町村, イベント名)"""
+    rest, tags = summary, []
+    while True:
+        m = re.match(r"\s*([^【]*?)\s*【([^】]+)】(.*)", rest)
+        if not m:
+            break
+        before, inner, after = m.groups()
+        if before:
+            tags.append(before)
+        area = area_of(inner)
+        if area or not re.match(r"\s*[^【]*?【", after):
+            tag = " ".join(t for t in tags if t).strip()
+            return tag, inner.strip(), area, after.strip()
+        tags.append(inner)   # 【中止】など、場所ではない【】
+        rest = after
+    return " ".join(tags).strip(), "", "", rest.strip()
 
 WD = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
 JST = dt.timezone(dt.timedelta(hours=9))
@@ -218,8 +258,7 @@ def parse_fields(text, summary):
     return out
 
 
-def build(raw, today):
-    lo, hi = today, today + dt.timedelta(days=DAYS_AHEAD)
+def build(raw, lo, hi):
     events = read_events(raw)
     overrides = {}
     for ev in events:
@@ -236,8 +275,7 @@ def build(raw, today):
         summary = ev.get("summary", "").strip()
         if not summary:
             continue
-        m = re.match(r"(.*?)【(.+?)】\s*(.*)", summary)
-        tag, muni, name = (m.group(1).strip(), m.group(2).strip(), m.group(3).strip()) if m else ("", "", summary)
+        tag, muni, area, name = split_title(summary)
         muni = ALIASES.get(muni, muni)
         fields = parse_fields(to_text(ev.get("description", "")), summary)
         loc = ev.get("location", "").strip()
@@ -249,25 +287,69 @@ def build(raw, today):
                 continue
             items.append({
                 "s": s.isoformat(), "e": e.isoformat(), "time": ev["time"],
-                "tag": tag, "muni": muni, "name": name,
-                "color": COLORS.get(muni, DEFAULT_COLOR),
+                "tag": tag, "muni": muni, "area": area, "name": name,
+                "color": COLORS.get(area, DEFAULT_COLOR),
                 "long": length >= LONG_DAYS, "f": fields,
             })
     items.sort(key=lambda x: (x["s"], x["muni"], x["name"]))
     return items
 
 
-def main():
-    now = dt.datetime.now(JST)
-    req = urllib.request.Request(ICS_URL, headers={"User-Agent": "Mozilla/5.0"})
-    raw = urllib.request.urlopen(req, timeout=60).read().decode("utf-8")
-    items = build(raw, now.date())
-    data = {"updated": now.strftime("%Y-%m-%d %H:%M"), "events": items}
-    with open(os.path.join(HERE, "events.js"), "w", encoding="utf-8") as f:
-        f.write("window.IWATE_EVENTS = ")
+def fetch_calendar(tries=4):
+    """カレンダーを読み込む。通信が不安定なときは少し待って読み直す。"""
+    import time
+    for n in range(tries):
+        try:
+            req = urllib.request.Request(ICS_URL, headers={"User-Agent": "Mozilla/5.0"})
+            return urllib.request.urlopen(req, timeout=120).read().decode("utf-8")
+        except Exception as e:
+            if n == tries - 1:
+                raise
+            print("読み込みに失敗したので、もう一度試します:", e)
+            time.sleep(15)
+
+
+def write_js(path, name, data):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("window.%s = " % name)
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
         f.write(";\n")
-    print("書き出しました: %d 件（%s 時点）" % (len(items), data["updated"]))
+
+
+def main():
+    now = dt.datetime.now(JST)
+    today = now.date()
+    raw = fetch_calendar()
+    items = build(raw, dt.date(2000, 1, 1), today + dt.timedelta(days=365 * YEARS_AHEAD))
+    if not items:
+        raise SystemExit("予定が1件も読めませんでした")
+
+    # 月ごとのデータ（カレンダー用）: data/2026-11.json など
+    months = {}
+    for it in items:
+        s, e = dt.date.fromisoformat(it["s"]), dt.date.fromisoformat(it["e"])
+        y, m = s.year, s.month
+        while (y, m) <= (e.year, e.month):
+            months.setdefault("%04d-%02d" % (y, m), []).append(it)
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    os.makedirs(os.path.join(HERE, "data"), exist_ok=True)
+    for key, evs in months.items():
+        with open(os.path.join(HERE, "data", key + ".json"), "w", encoding="utf-8") as f:
+            json.dump(evs, f, ensure_ascii=False, separators=(",", ":"))
+
+    # 検索用の全部入りデータ（検索したときだけ読み込む）
+    with open(os.path.join(HERE, "data", "all.json"), "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False, separators=(",", ":"))
+
+    # これからの予定（一覧用）と、カレンダーで見られる月の範囲
+    upcoming = [it for it in items if it["e"] >= today.isoformat()]
+    keys = sorted(months)
+    data = {"updated": now.strftime("%Y-%m-%d %H:%M"), "first": keys[0], "last": keys[-1],
+            "months": keys, "munis": [m for m in OFFICIAL if any(it["area"] == m for it in items)],
+            "events": upcoming}
+    write_js(os.path.join(HERE, "events.js"), "IWATE_EVENTS", data)
+    print("書き出しました: 全%d件（%s〜%s、%dか月分）／これから%d件（%s 時点）" % (
+        len(items), keys[0], keys[-1], len(keys), len(upcoming), data["updated"]))
 
 
 if __name__ == "__main__":

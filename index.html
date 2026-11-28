@@ -55,7 +55,7 @@
     padding: 10px 12px; border-radius: 12px; border: 2px solid var(--line); background: var(--paper);
   }
 
-  .search { position: relative; margin: 14px 0 0; }
+  .search { position: relative; margin: 14px 0 0; scroll-margin-top: 72px; }
   .search input {
     width: 100%; font: inherit; font-size: 16px; font-weight: 700; color: var(--ink);
     padding: 12px 48px 12px 44px; border-radius: 14px; border: 2px solid var(--line); background: var(--paper);
@@ -190,6 +190,27 @@
 
   .empty { background: var(--paper); border-radius: 16px; padding: 24px 16px; text-align: center; margin-top: 20px; font-weight: 700; }
 
+  .map-sec { max-width: 640px; margin: 0 auto; padding: 0 16px 28px; }
+  .map-sec h2 { margin: 0 0 4px; font-size: 20px; font-weight: 900; color: var(--maroon); }
+  .map-lead { margin: 0 0 10px; font-size: 14px; color: var(--sub); }
+  .map-box { background: var(--paper); border-radius: 16px; padding: 10px; box-shadow: 0 2px 6px rgba(80,40,50,.12); }
+  #map svg { display: block; width: 100%; height: auto; }
+  #map path { stroke: #fff; stroke-width: 1.6; stroke-linejoin: round; cursor: pointer; transition: opacity .15s; }
+  #map path:focus { outline: none; }
+  #map path:focus-visible, #map path.on { stroke: var(--maroon); stroke-width: 4; }
+  #map.picking path:not(.on) { opacity: .35; }
+  #map text {
+    font-size: 21px; font-weight: 900; fill: #2E2224; text-anchor: middle; dominant-baseline: middle;
+    paint-order: stroke; stroke: rgba(255,255,255,.92); stroke-width: 5px; stroke-linejoin: round; pointer-events: none;
+  }
+  #map text.small { font-size: 16px; }
+  @media (prefers-reduced-motion: reduce) { #map path { transition: none; } }
+  .map-state { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+  #map-picked { font-weight: 900; color: var(--maroon); }
+  #map-reset { min-height: 42px; padding: 6px 14px; }
+  #map-reset::after { content: none; }
+  .map-credit { font-size: 11.5px; color: var(--sub); margin: 8px 2px 0; }
+
   footer { max-width: 640px; margin: 0 auto; padding: 0 16px 48px; }
   .notice {
     background: var(--paper); border-radius: 16px; padding: 14px 16px; font-weight: 800; text-align: center;
@@ -230,6 +251,19 @@
   <div id="list"></div>
 </main>
 
+<section class="map-sec" aria-labelledby="map-title">
+  <h2 id="map-title">地図から市町村を選ぶ</h2>
+  <p class="map-lead">市町村を押すと、その市町村のイベントだけを表示します。色がついているのは、これからイベントがある市町村です。</p>
+  <div class="map-box">
+    <div id="map"></div>
+    <div class="map-state">
+      <span id="map-picked">すべての市町村を表示中</span>
+      <button type="button" class="btn sub" id="map-reset" hidden>すべてに戻す</button>
+    </div>
+  </div>
+  <p class="map-credit">出典：国土交通省 国土数値情報（行政区域データ）を加工して作成</p>
+</section>
+
 <footer>
   <div class="notice">おでかけ前には必ず公式ページを確認してください♪</div>
   <div class="links">
@@ -240,6 +274,7 @@
 </footer>
 
 <script src="events.js"></script>
+<script src="iwate_map.js"></script>
 <script>
 (function () {
   var DATA = window.IWATE_EVENTS || { events: [], updated: "" };
@@ -618,7 +653,70 @@
     o.value = m;
     sel.appendChild(o);
   });
-  sel.addEventListener("change", function () { selDay = null; pastShown = PAST_STEP; render(); });
+  sel.addEventListener("change", function () { selDay = null; pastShown = PAST_STEP; render(); updateMap(); });
+
+  // ---- 地図から選ぶ ----
+  var mapBox = document.getElementById("map");
+  var mapPaths = {};
+  var COLOR_OF = {};
+  DATA.events.forEach(function (ev) { if (ev.area) COLOR_OF[ev.area] = ev.color; });
+  var NS = "http://www.w3.org/2000/svg";
+
+  function pickTown(name) {
+    sel.value = sel.value === name ? "" : name;
+    selDay = null; pastShown = PAST_STEP;
+    render(); updateMap();
+    var top = document.querySelector(".search");
+    if (top) top.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function updateMap() {
+    var cur = sel.value;
+    mapBox.classList.toggle("picking", !!cur);
+    Object.keys(mapPaths).forEach(function (n) { mapPaths[n].classList.toggle("on", n === cur); });
+    var count = cur ? (munis[cur] || 0) : 0;
+    document.getElementById("map-picked").textContent = cur
+      ? cur + "を表示中（これから" + count + "件）" : "すべての市町村を表示中";
+    document.getElementById("map-reset").hidden = !cur;
+  }
+
+  if (window.IWATE_MAP) {
+    var M = window.IWATE_MAP;
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + M.w + " " + M.h);
+    svg.setAttribute("role", "group");
+    svg.setAttribute("aria-label", "岩手県の地図");
+    var labels = document.createElementNS(NS, "g");
+    M.towns.forEach(function (t) {
+      var p = document.createElementNS(NS, "path");
+      p.setAttribute("d", t.d);
+      p.setAttribute("fill", munis[t.name] ? (COLOR_OF[t.name] || "#C9A9B0") : "#E4DADC");
+      p.setAttribute("tabindex", "0");
+      p.setAttribute("role", "button");
+      p.setAttribute("aria-label", t.name + "（これから" + (munis[t.name] || 0) + "件）");
+      var title = document.createElementNS(NS, "title");
+      title.textContent = t.name + "（これから" + (munis[t.name] || 0) + "件）";
+      p.appendChild(title);
+      p.addEventListener("click", function () { pickTown(t.name); });
+      p.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickTown(t.name); }
+      });
+      svg.appendChild(p);
+      mapPaths[t.name] = p;
+      var tx = document.createElementNS(NS, "text");
+      tx.setAttribute("x", t.x);
+      tx.setAttribute("y", t.y);
+      if (t.a < 5000) tx.setAttribute("class", "small");
+      tx.textContent = t.name.replace(/(市|町|村)$/, "");
+      labels.appendChild(tx);
+    });
+    svg.appendChild(labels);
+    mapBox.appendChild(svg);
+    document.getElementById("map-reset").addEventListener("click", function () { pickTown(sel.value); });
+    updateMap();
+  } else {
+    document.querySelector(".map-sec").hidden = true;
+  }
 
   if (DATA.updated) {
     var u = DATA.updated.split(" "), ud = u[0].split("-");
